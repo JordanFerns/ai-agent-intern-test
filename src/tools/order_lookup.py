@@ -39,21 +39,23 @@ class OrderLookupService:
     def normalize_order_id(raw_id: str) -> Optional[str]:
         """
         Normalize harmless whitespace, punctuation, and casing.
-        Extracts 'ORD-XXXX' format safely without hallucinating digits.
+        Extracts 'ORD-XXXX' format safely without hallucinating digits or matching arbitrary prose.
         """
         if not raw_id or not isinstance(raw_id, str):
             return None
         
         cleaned = raw_id.strip().upper()
-        # Match pattern like ORD-1001 or ord 1001 or ord-1001
-        match = re.search(r"\bORD[- ]?(\d+)\b", cleaned, re.IGNORECASE)
+        # Look for explicit pattern ORD-1001, ord 1001, ORD1001, #ORD-1001
+        match = re.search(r"\bORD[- ]?(\d{3,6})\b", cleaned, re.IGNORECASE)
         if match:
             digits = match.group(1)
             return f"ORD-{digits}"
         
-        # If it doesn't match standard prefix, check if it's already just alphanumeric
-        clean_alphanumeric = re.sub(r"[^A-Z0-9-]", "", cleaned)
-        return clean_alphanumeric if clean_alphanumeric else None
+        # Exact match if passed directly as ORD-XXXX
+        if re.match(r"^ORD-\d+$", cleaned, re.IGNORECASE):
+            return cleaned.upper()
+
+        return None
 
     def lookup(self, raw_order_id: str) -> SanitizedOrderResult:
         """
@@ -105,7 +107,6 @@ class OrderLookupService:
             )
 
         # Apply Status Precedence Rules:
-        # If cancelled or returned, strip carrier/tracking/estimated_delivery to avoid stale ETA confusion
         carrier = raw_order.get("carrier")
         tracking_number = raw_order.get("tracking_number")
         estimated_delivery = raw_order.get("estimated_delivery")
