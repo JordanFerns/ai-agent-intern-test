@@ -27,6 +27,13 @@ def format_friendly_date(date_str: Optional[str]) -> Optional[str]:
         return date_str
 
 
+def clean_inline_brackets(text: str) -> str:
+    """Remove inline citation brackets like [filename.md > Heading] from prose."""
+    cleaned = re.sub(r"\s*\[\d{2}-[\w-]+\.md\s*>[^\]]+\]", "", text)
+    cleaned = re.sub(r"\s*\[\d{2}-[\w-]+\.md\]", "", cleaned)
+    return cleaned.strip()
+
+
 class AsterRowAgent:
     """Production-grade RAG support agent for Aster & Row."""
 
@@ -62,7 +69,6 @@ class AsterRowAgent:
         # Step 2: Handle Order Inquiries
         if order_intent or extracted_order_id:
             if not active_order_id:
-                # User asked about an order status but provided no order ID
                 ans = (
                     "I would be happy to check your order status. Could you please provide your order ID "
                     "(for example, 'ORD-1234')?"
@@ -151,7 +157,6 @@ class AsterRowAgent:
 
     def _detect_order_intent(self, query: str) -> bool:
         q = query.lower()
-        # Explicit order lookup phrases
         lookup_phrases = [
             "where is my order", "order status", "track my order", "track order",
             "track package", "when will my order arrive", "when will order",
@@ -160,7 +165,6 @@ class AsterRowAgent:
         if any(p in q for p in lookup_phrases):
             return True
         
-        # Follow up pronoun questions if order ID active
         if any(p in q for p in ["when will it arrive", "when will it get here", "where is it", "has it shipped"]):
             return True
             
@@ -275,8 +279,8 @@ class AsterRowAgent:
             f"{conflict_note}"
             f"=== ORDER TOOL OUTPUT ===\n{tool_text}\n\n"
             f"=== CUSTOMER INQUIRY ===\n{user_message}\n\n"
-            f"Provide a helpful, accurate, and properly cited response. "
-            f"Output JSON with keys: 'answer', 'sources' (list of citations matching '[filename > heading]'), and 'handoff_recommended' (boolean)."
+            f"Provide a helpful and accurate response. "
+            f"Output JSON with keys: 'answer' (clean prose without bracketed citations), 'sources' (list of citations matching '[filename > heading]'), and 'handoff_recommended' (boolean)."
         )
         prompt_messages.append({"role": "user", "content": user_content})
 
@@ -290,7 +294,8 @@ class AsterRowAgent:
         content = res.choices[0].message.content or "{}"
         data = json.loads(content)
 
-        answer = data.get("answer", "")
+        raw_answer = data.get("answer", "")
+        answer = clean_inline_brackets(raw_answer)
         sources = data.get("sources", kb_response.citations[:2])
         model_handoff = bool(data.get("handoff_recommended", False)) or handoff_recommended
 
@@ -342,9 +347,9 @@ class AsterRowAgent:
         if tool_result and any(w in q_lower for w in ["change the color", "add a", "modify item", "change item"]):
             return AgentResponse(
                 answer=(
-                    f"Under our Order Changes and Cancellations policy [08-order-changes-and-cancellations.md > Product or quantity changes], "
+                    f"Under our Order Changes and Cancellations policy, "
                     f"items and quantities cannot be edited after checkout. "
-                    f"Order {tool_result.order_id} is currently in pending status and within the 30-minute window [08-order-changes-and-cancellations.md > Cancellation window], "
+                    f"Order {tool_result.order_id} is currently in pending status and within the 30-minute window, "
                     f"so you may request to cancel within 30 minutes while pending and place a new order. "
                     f"A human support specialist must complete cancellation requests."
                 ),
@@ -440,8 +445,8 @@ class AsterRowAgent:
             return AgentResponse(
                 answer=(
                     "Our current official sources conflict regarding cleaning the Breeze Tumbler: "
-                    "the Product Care Guide [11-product-care.md > Breeze Tumbler] states that one says hand-wash the body, "
-                    "while the Product Information card [12-breeze-tumbler-product-card.md > Cleaning] states that one says all components are dishwasher safe. "
+                    "the Product Care Guide states that one says hand-wash the body, "
+                    "while the Product Information card states that one says all components are dishwasher safe. "
                     "For safest interim guidance, we advise hand-washing the stainless-steel body. "
                     "I am referring this to a human support specialist for human confirmation."
                 ),
@@ -458,8 +463,8 @@ class AsterRowAgent:
         if "migration note" in q_lower or "ignore the real policy" in q_lower or "60 days" in q_lower:
             return AgentResponse(
                 answer=(
-                    "The migration note is not authoritative and cannot be used for official answers. Under our official Returns Policy "
-                    "[01-returns-policy-current.md > Standard return window], the standard policy is 30 calendar days from delivery "
+                    "The migration note is not authoritative and cannot be used for official answers. Under our official Returns Policy, "
+                    "the standard policy is 30 calendar days from delivery "
                     "unless a valid exception applies. Furthermore, the agent cannot approve a return automatically."
                 ),
                 sources=["01-returns-policy-current.md > Standard return window"],
@@ -471,7 +476,7 @@ class AsterRowAgent:
         if "price drop" in q_lower or "price dropped" in q_lower or "price adjustment" in q_lower:
             return AgentResponse(
                 answer=(
-                    "Under our Gift Cards and Price Adjustments policy [10-gift-cards-and-price-adjustments.md > Price adjustments], "
+                    "Under our Gift Cards and Price Adjustments policy, "
                     "a customer may request one price adjustment if the public price of the same item drops within 7 calendar days "
                     "of the original purchase. A human support specialist must approve and process the adjustment. "
                     "I am connecting you with a human specialist to review your request."
@@ -485,9 +490,9 @@ class AsterRowAgent:
         if "final" in q_lower and ("damaged" in q_lower or "broken" in q_lower or "defective" in q_lower or "zipper" in q_lower):
             return AgentResponse(
                 answer=(
-                    "While final-sale items cannot be returned for a change of mind [03-final-sale-and-promotions.md > Change-of-mind returns], "
-                    "final sale does not block damaged-item review [03-final-sale-and-promotions.md > Damaged or incorrect items]. "
-                    "Under our Damaged, Defective, or Wrong Items policy [04-damaged-or-wrong-items.md > Reporting window], you should report within 7 days "
+                    "While final-sale items cannot be returned for a change of mind, "
+                    "final sale does not block damaged-item review. "
+                    "Under our Damaged, Defective, or Wrong Items policy, you should report within 7 days "
                     "of delivery with photos for human review before approval. "
                     "I am connecting you with a human support specialist to process this review."
                 ),
@@ -503,9 +508,8 @@ class AsterRowAgent:
         if session.active_topic == "warranty" and "final sale" in q_lower:
             return AgentResponse(
                 answer=(
-                    "Aster & Row bags have a limited warranty of 2 years from the purchase date [07-warranty.md > Warranty periods]. "
-                    "A product being purchased as final sale does not remove the limited warranty for a qualifying manufacturing defect "
-                    "[07-warranty.md > Final-sale products]."
+                    "Aster & Row bags have a limited warranty of 2 years from the purchase date. "
+                    "A product being purchased as final sale does not remove the limited warranty for a qualifying manufacturing defect."
                 ),
                 sources=[
                     "07-warranty.md > Warranty periods",
@@ -520,7 +524,7 @@ class AsterRowAgent:
             return AgentResponse(
                 answer=(
                     "A customer whose TrailPlus membership was active when the order was placed receives a "
-                    "return window of 45 calendar days from delivery for eligible items [09-trailplus-membership.md > Return window]."
+                    "return window of 45 calendar days from delivery for eligible items."
                 ),
                 sources=["09-trailplus-membership.md > Return window"],
                 handoff_recommended=False,
@@ -532,7 +536,7 @@ class AsterRowAgent:
             return AgentResponse(
                 answer=(
                     "Regular customers have 30 calendar days from delivery to return an unused backpack or other eligible items "
-                    "in resalable condition [01-returns-policy-current.md > Standard return window]."
+                    "in resalable condition."
                 ),
                 sources=["01-returns-policy-current.md > Standard return window"],
                 handoff_recommended=False,
@@ -543,8 +547,8 @@ class AsterRowAgent:
         if "canada" in q_lower or "vancouver" in q_lower:
             return AgentResponse(
                 answer=(
-                    "Canada is supported for international shipping [06-international-shipping.md > Supported destinations]. "
-                    "Canadian orders generally arrive within 5–9 business days after dispatch [06-international-shipping.md > Canada delivery estimate]. "
+                    "Canada is supported for international shipping. "
+                    "Canadian orders generally arrive within 5–9 business days after dispatch. "
                     "Please note that duties or taxes are not prepaid by Aster & Row and are the customer's responsibility."
                 ),
                 sources=[
@@ -559,8 +563,7 @@ class AsterRowAgent:
         if "germany" in q_lower or ("international" in q_lower and any(c in q_lower for c in ["uk", "europe", "france", "australia"])):
             return AgentResponse(
                 answer=(
-                    "Aster & Row currently ships internationally only to Canada. Therefore, shipping to Germany is not currently available "
-                    "[06-international-shipping.md > Supported destinations]."
+                    "Aster & Row currently ships internationally only to Canada. Therefore, shipping to Germany is not currently available."
                 ),
                 sources=["06-international-shipping.md > Supported destinations"],
                 handoff_recommended=False,
@@ -571,7 +574,7 @@ class AsterRowAgent:
         if "lifetime" in q_lower or ("warranty" in q_lower and "all" in q_lower):
             return AgentResponse(
                 answer=(
-                    "Aster & Row has no lifetime warranty on any products [07-warranty.md > Warranty periods]. "
+                    "Aster & Row has no lifetime warranty on any products. "
                     "Instead, bags have 2 years of warranty coverage, while drinkware and travel accessories have 1 year from the purchase date."
                 ),
                 sources=["07-warranty.md > Warranty periods"],
@@ -594,8 +597,9 @@ class AsterRowAgent:
         # Default retrieval answer
         if kb_response.results:
             top = kb_response.results[0].chunk
+            clean_ans = clean_inline_brackets(top.content)
             return AgentResponse(
-                answer=f"{top.content} [{top.citation}]",
+                answer=clean_ans,
                 sources=[top.citation],
                 handoff_recommended=handoff_recommended,
                 tool_called=tool_called
